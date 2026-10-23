@@ -1,0 +1,45 @@
+# Local environments and Python artifacts
+venv/
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# Repository and local tooling
+.git/
+.gitignore
+.agents/
+.codex/
+.vscode/
+.idea/
+
+# Local secrets and credentials
+**/.env
+**/.env.*
+**/.aws/
+**/.ssh/
+**/secrets/
+**/*.pem
+**/*.key
+
+# Tests and documentation
+tests/
+docs/
+README.md
+requirements-dev.txt
+
+# Editor files and logs
+**/*.swp
+**/*.swo
+**/*.save
+**/*~
+**/*.log
+
+# Frontend dependencies and local build output
+**/node_modules/
+dist/
+build/
