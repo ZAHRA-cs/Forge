@@ -34,3 +34,90 @@ jobs:
 
       - name: Build Docker image
         run: docker build --tag forge:ci .
+
+      - name: Start container
+        id: runtime
+        run: |
+          container_id=$(docker run --detach \
+            --name forge-ci-runtime \
+            --publish 127.0.0.1:5000:5000 \
+            forge:ci)
+          echo "container_id=$container_id" >> "$GITHUB_OUTPUT"
+
+      - name: Verify container runtime
+        timeout-minutes: 3
+        env:
+          CONTAINER_ID: ${{ steps.runtime.outputs.container_id }}
+        run: |
+          deadline=$((SECONDS + 120))
+          while true; do
+            state=$(docker inspect --format '{{.State.Status}}' "$CONTAINER_ID")
+            health=$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER_ID")
+            echo "Container state: $state; health: $health"
+
+            if [ "$state" != "running" ]; then
+              echo "Container is not running."
+              exit 1
+            fi
+            if [ "$health" = "healthy" ]; then
+              break
+            fi
+            if [ "$health" = "unhealthy" ]; then
+              echo "Container health check failed."
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Timed out waiting for a healthy container."
+              exit 1
+            fi
+            sleep 2
+          done
+
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+          base_url = "http://127.0.0.1:5000"
+
+          with opener.open(f"{base_url}/", timeout=3) as response:
+              assert response.status == 200, "GET / did not return HTTP 200"
+              assert response.read().decode("utf-8") == "Forge is running!", \
+                  "GET / returned an unexpected body"
+          print("GET / passed")
+
+          with opener.open(f"{base_url}/health", timeout=3) as response:
+              assert response.status == 200, "GET /health did not return HTTP 200"
+              data = json.load(response)
+              assert isinstance(data, dict) and data.get("status") == "healthy", \
+                  "GET /health returned an unexpected JSON status"
+          print("GET /health passed")
+          PY
+
+      - name: Collect container diagnostics
+        if: ${{ failure() && steps.runtime.outcome != 'skipped' }}
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          CONTAINER_ID: ${{ steps.runtime.outputs.container_id }}
+        run: |
+          if [ -n "$CONTAINER_ID" ]; then
+            docker logs "$CONTAINER_ID" || true
+            docker inspect --format '{{json .State}}' "$CONTAINER_ID" || true
+          fi
+
+      - name: Clean up container
+        if: ${{ always() && steps.runtime.outcome != 'skipped' }}
+        timeout-minutes: 1
+        env:
+          CONTAINER_ID: ${{ steps.runtime.outputs.container_id }}
+        run: |
+          container_id=""
+          if [ -n "$CONTAINER_ID" ]; then
+            container_id=$(docker ps --all --quiet --no-trunc --filter "id=$CONTAINER_ID")
+          fi
+          if [ -n "$container_id" ]; then
+            docker rm --force "$container_id"
+          else
+            echo "No temporary container to remove."
+          fi
